@@ -10593,12 +10593,20 @@ impl eframe::App for HpsdrApp {
                                         ui.label("Last gap:");
                                         ui.label(connected.last_gap_utc.as_deref().unwrap_or("never"));
                                         ui.end_row();
+                                        ui.label("Clipped samples:");
+                                        ui.label(spectrum::AUDIO_CLIPPED.load(Ordering::Relaxed).to_string());
+                                        ui.end_row();
+                                        ui.label("Queue overflow drops:");
+                                        ui.label(spectrum::AUDIO_OVERFLOW_DROPS.load(Ordering::Relaxed).to_string());
+                                        ui.end_row();
                                     });
                                     if ui
                                         .button("Reset")
                                         .on_hover_text("Count again from now, e.g. after changing from Wi-Fi to a cable")
                                         .clicked()
                                     {
+                                        spectrum::AUDIO_CLIPPED.store(0, Ordering::Relaxed);
+                                        spectrum::AUDIO_OVERFLOW_DROPS.store(0, Ordering::Relaxed);
                                         connected.stutter_base = (
                                             connected.session.lost_packets.load(Ordering::Relaxed),
                                             connected.session.received_packets.load(Ordering::Relaxed),

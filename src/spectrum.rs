@@ -13,7 +13,7 @@ use crate::wdsp_sys as wdsp;
 use std::collections::VecDeque;
 use std::ffi::CString;
 use std::os::raw::c_int;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -700,6 +700,12 @@ impl Default for DemodParams {
 // between what's on screen and what's heard, rather than self-
 // correcting. A small cap bounds worst-case audio delay directly.
 const AUDIO_BUFFER_CAPACITY: usize = 14_400;
+
+/// Crackle diagnostics, shown in Settings > About: output samples hard-
+/// clipped by Audio Gain, and frames dropped because the playback queue
+/// was full. Neither shows up as an audio gap.
+pub static AUDIO_CLIPPED: AtomicU64 = AtomicU64::new(0);
+pub static AUDIO_OVERFLOW_DROPS: AtomicU64 = AtomicU64::new(0);
 
 /// Capacity for waveform_out specifically -- NOT shared with
 /// AUDIO_BUFFER_CAPACITY above, deliberately: that constant is sized
@@ -1961,10 +1967,15 @@ fn run(
                 // the real (l, r) pair -- identical (l==r) when binaural
                 // is off, same as every consumer effectively saw before
                 // this was ever a stereo pair at all.
-                let (l, r) = ((l * params.gain).clamp(-1.0, 1.0), (r * params.gain).clamp(-1.0, 1.0));
+                let (gl, gr) = (l * params.gain, r * params.gain);
+                if gl.abs() > 1.0 || gr.abs() > 1.0 {
+                    AUDIO_CLIPPED.fetch_add(1, Ordering::Relaxed);
+                }
+                let (l, r) = (gl.clamp(-1.0, 1.0), gr.clamp(-1.0, 1.0));
                 if !mute_local {
                     if out.len() >= AUDIO_BUFFER_CAPACITY {
                         out.pop_front();
+                        AUDIO_OVERFLOW_DROPS.fetch_add(1, Ordering::Relaxed);
                     }
                     // Muted: silence rather than nothing, so the sound
                     // card stays fed and unmuting doesn't start with a
